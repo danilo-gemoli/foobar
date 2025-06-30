@@ -15,7 +15,7 @@ metadata:
     appstudio.openshift.io/application: foobar
     appstudio.openshift.io/component: foobar
     pipelines.appstudio.openshift.io/type: build
-  name: foobar-on-pull-request
+  name: foobar-on-pull-request-stg
   namespace: testplatform-ci-tenant
 spec:
   params:
