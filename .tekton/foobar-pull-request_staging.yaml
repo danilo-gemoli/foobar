@@ -30,9 +30,11 @@ spec:
             #!/bin/bash
             set -eo pipefail
             echo "---"
-            echo "{{ body }}"
+            echo "taskRun name: $(context.taskRun.name)"
             echo "---"
-            echo "{{ headers }}"
+            echo "taskRun NS: $(context.taskRun.namespace)"
+            echo "---"
+            echo "taskRun uid: $(context.taskRun.uid)"
             echo "---"
   taskRunTemplate:
     serviceAccountName: build-pipeline-foobar
