@@ -19,23 +19,175 @@ metadata:
   namespace: testplatform-ci-tenant
 spec:
   pipelineSpec:
-    description: dummy
+    description: |
+      Provision and deprovision an ephemeral cluster
     tasks:
-    - name: dump-variables
+    - name: provision-ephemeral-cluster
+      params:
+      - name: workflow
+        value: ipi-aws
+      - name: clusterProfile
+        value: aws-2
+      - name: releases
+        value: '{"initial":{"integration":{"name":"4.20","namespace":"ocp"}},"latest":{"integration":{"name":"4.20","namespace":"ocp"}}}'
+      - name: ownerName
+        value: $(context.pipelineRun.name)
+      - name: ownerUid
+        value: $(context.pipelineRun.uid)
       taskSpec:
+        params:
+        - name: workflow
+          type: string
+        - name: clusterProfile
+          type: string
+        - name: releases
+          type: string
+        - name: ownerKind
+          type: string
+          default: PipelineRun
+        - name: ownerName
+          type: string
+        - name: ownerUid
+          type: string
+        results:
+        - name: secretRef
+          description: Name of a Secret containing a kubeconfig used to access the provisioned ephemeral cluster.
+          type: string
+        - name: testPlatformClusterClaimName
+          description: Name of the TestPlatformCluster Claim that is used to request an ephemeral cluster
+          type: string
+        - name: testPlatformClusterClaimNamespace
+          description: Namespace of the TestPlatformCluster Claim that is used to request an ephemeral cluster
+          type: string
         steps:
-        - name: dump-variables
-          image: registry.redhat.io/openshift4/ose-cli:4.13@sha256:73df37794ffff7de1101016c23dc623e4990810390ebdabcbbfa065214352c7c 
+        - name: provision-ephemeral-cluster
+          image: quay.io/konflux-ci/konflux-test:v1.4.31@sha256:a7cae9e96663e277a3904d0c78630508ddb6cc8eebaa912a840bd20f68dcaad1
+          env:
+          - name: WORKFLOW
+            value: $(params.workflow)
+          - name: ENV
+            value: "{}"
+          - name: CLUSTER_PROFILE
+            value: $(params.clusterProfile)
+          - name: RELEASES
+            value: $(params.releases)
+          - name: RESOURCES
+            value: "{}"
+          - name: CLAIM_NAME
+            value: $(context.taskRun.name)
+          - name: NAMESPACE
+            value: $(context.taskRun.namespace)
+          - name: OWNER_KIND
+            value: $(params.ownerKind)
+          - name: OWNER_NAME
+            value: $(params.ownerName)
+          - name: OWNER_UID
+            value: $(params.ownerUid)
+          - name: SECRET
+            value: $(context.taskRun.name)-secret
           script: |
             #!/bin/bash
             set -eo pipefail
-            echo "---"
-            echo "taskRun name: $(context.taskRun.name)"
-            echo "---"
-            echo "taskRun NS: $(context.taskRun.namespace)"
-            echo "---"
-            echo "taskRun uid: $(context.taskRun.uid)"
-            echo "---"
-  taskRunTemplate:
-    serviceAccountName: build-pipeline-foobar
+
+            cat <<EOF >testplatformcluster_claim.yaml
+            apiVersion: ci.openshift.org/v1alpha1
+            kind: TestPlatformCluster
+            metadata:
+              name: $CLAIM_NAME
+              namespace: $NAMESPACE
+              ownerReferences:
+              - apiVersion: tekton.dev/v1
+                kind: $OWNER_KIND
+                name: $OWNER_NAME
+                uid: $OWNER_UID
+            spec:
+              ciOperator:
+                releases: $RELEASES
+                resources: $RESOURCES
+                test:
+                  clusterProfile: $CLUSTER_PROFILE
+                  env: $ENV
+                  workflow: $WORKFLOW
+              writeConnectionSecretToRef:
+                name: $SECRET
+            EOF
+
+            NAME=$(oc create -f testplatformcluster_claim.yaml -o=jsonpath='{.metadata.name}')
+
+            if oc wait testplatformclusters.ci.openshift.org "$NAME" --for=condition=ClusterReady=true --timeout=2h; then
+              echo "SecretRef: $SECRET"
+              echo -n "$SECRET" >"$(results.secretRef.path)"
+              echo -n "$CLAIM_NAME" >"$(results.testPlatformClusterClaimName.path)"
+              echo -n "$NAMESPACE" >"$(results.testPlatformClusterClaimNamespace.path)"
+            else
+              echo "Error: failed to provision the cluster"
+              exit 1
+            fi
+
+    - name: run-test
+      runAfter:
+      - provision-ephemeral-cluster
+      params:
+      - name: kubeconfigSecretRef
+        value: $(tasks.provision-ephemeral-cluster.results.secretRef)
+      taskSpec:
+        params:
+        - name: kubeconfigSecretRef
+          type: string
+        steps:
+        - name: run-test
+          env:
+          - name: KUBECONFIG_CONTENT
+            valueFrom:
+              secretKeyRef:
+                name: $(params.kubeconfigSecretRef)
+                key: kubeconfig
+          image: registry.redhat.io/openshift4/ose-cli:4.13@sha256:73df37794ffff7de1101016c23dc623e4990810390ebdabcbbfa065214352c7c
+          script: |
+            #!/usr/bin/env bash
+            export KUBECONFIG=/tmp/ec-kubeconfig
+            echo "$KUBECONFIG_CONTENT" >"$KUBECONFIG"
+            oc whoami
+
+    finally:
+    - name: deprovision-ephemeral-cluster
+      params:
+      - name: testPlatformClusterClaimName
+        value: $(tasks.provision-ephemeral-cluster.results.testPlatformClusterClaimName)
+      - name: testPlatformClusterClaimNamespace
+        value: $(tasks.provision-ephemeral-cluster.results.testPlatformClusterClaimNamespace)
+      taskSpec:
+        params:
+        - name: testPlatformClusterClaimName
+          type: string
+        - name: testPlatformClusterClaimNamespace
+          type: string
+        steps:
+        - name: deprovision-ephemeral-cluster
+          image: registry.redhat.io/openshift4/ose-cli:4.13@sha256:73df37794ffff7de1101016c23dc623e4990810390ebdabcbbfa065214352c7c
+          env:
+          - name: CLAIM_NAME
+            value: $(params.testPlatformClusterClaimName)
+          - name: NAMESPACE
+            value: $(params.testPlatformClusterClaimNamespace)
+          script: |
+            #!/bin/bash
+            set -eo pipefail
+
+            cat >deprovision-patch.json <<EOF
+            [{
+                "op": "add",
+                "path": "/spec/tearDownCluster",
+                "value": true
+            }]
+            EOF
+
+            oc -n "$NAMESPACE" patch testplatformclusters.ci.openshift.org "$CLAIM_NAME" --type=json --patch-file=deprovision-patch.json
+
+            if oc -n "$NAMESPACE" wait testplatformclusters.ci.openshift.org "$CLAIM_NAME" --for=condition=ProwJobCompleted=true --timeout=1h; then
+              echo 'The cluster has been properly deprovisioned'
+            else
+              echo "Error: failed to deprovision the cluster"
+              exit 1
+            fi
 status: {}
