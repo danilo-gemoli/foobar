@@ -190,4 +190,8 @@ spec:
               echo "Error: failed to deprovision the cluster"
               exit 1
             fi
+
+  timeouts:
+    pipeline: "4h"
+
 status: {}
