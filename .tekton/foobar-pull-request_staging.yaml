@@ -147,7 +147,18 @@ spec:
             #!/usr/bin/env bash
             export KUBECONFIG=/tmp/ec-kubeconfig
             echo "$KUBECONFIG_CONTENT" >"$KUBECONFIG"
-            oc whoami
+
+            printf 'whoami: %s\n' "$(oc whoami)"
+            printf 'clusterID: %s\n' "$(oc get clusterversion/version -ojsonpath='{.spec.clusterID}')"
+
+            printf '\nWaiting for the secret to show up...\n'
+            while true; do
+                if $(oc -n default get secret/unblock &>/dev/null); then
+                    printf 'Secret found\n'
+                    break
+                fi
+                sleep 3s
+            done
 
     finally:
     - name: deprovision-ephemeral-cluster
