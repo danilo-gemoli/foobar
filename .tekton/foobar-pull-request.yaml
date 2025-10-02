@@ -45,6 +45,10 @@ spec:
         value: $(context.pipelineRun.name)
       - name: ownerUid
         value: $(context.pipelineRun.uid)
+      - name: prEventPayload
+        value: '{{ body }}'
+      - name: prEventHeaders
+        value: '{{ headers }}'
       taskRef:
         resolver: git
         params:
