@@ -79,11 +79,6 @@ spec:
               secretKeyRef:
                 name: $(params.clusterCredentialsSecretRef)
                 key: kubeconfig
-          - name: ADMIN_PASSWD
-            valueFrom:
-              secretKeyRef:
-                name: $(params.clusterCredentialsSecretRef)
-                key: kubeAdminPassword
           script: |
             #!/usr/bin/env bash
             set -eo pipefail
@@ -93,15 +88,6 @@ spec:
 
             echo "$KUBECONFIG_VALUE" >"$KUBECONFIG"
             export KUBECONFIG
-            oc whoami
-
-            kk="$KUBECONFIG"
-            unset KUBECONFIG
-
-            endpoint="$(yq '.clusters[0].cluster.server' $kk | sed 's|https://||g')"
-            printf 'endpoint: %s\n' "$endpoint"
-
-            oc login --insecure-skip-tls-verify -u kubeadmin -p "$(cat passwd)" "$endpoint"
             oc whoami
 
     finally:
