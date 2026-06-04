@@ -13,9 +13,9 @@ metadata:
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: foobar
-    appstudio.openshift.io/component: foobar-f1bce
+    appstudio.openshift.io/component: foobar-eb164
     pipelines.appstudio.openshift.io/type: build
-  name: foobar-f1bce-on-pull-request
+  name: foobar-eb164-on-pull-request
   namespace: testplatform-ci-tenant
 spec:
   pipelineSpec:
@@ -24,37 +24,31 @@ spec:
     tasks:
     - name: provision-ephemeral-cluster
       params:
+      - name: ownerName
+        value: $(context.pipelineRun.name)
+      - name: ownerUid
+        value: $(context.pipelineRun.uid)
       - name: workflow
         value: generic-claim
       - name: clusterClaim
         value: |
           {
             "architecture": "amd64",
-            "as": "unused",
             "cloud": "aws",
-            "labels": {
-              "region": "us-east-1"
-            },
-            "owner": "openshift-ci",
+            "owner": "obs",
             "product": "ocp",
-            "timeout": "1h0m0s",
-            "version": "4.19"
+            "timeout": "3h0m0s",
+            "version": "4.21"
           }
-      - name: ownerName
-        value: $(context.pipelineRun.name)
-      - name: ownerUid
-        value: $(context.pipelineRun.uid)
-      - name: prEventPayload
-        value: '{{ body }}'
-      - name: prEventHeaders
-        value: '{{ headers }}'
+      - name: timeout
+        value: "3h"
       taskRef:
         resolver: git
         params:
         - name: url
-          value: https://github.com/danilo-gemoli/openshift-konflux-tasks
+          value: https://github.com/openshift/konflux-tasks
         - name: revision
-          value: fix/ephemeral-cluster/env-param
+          value: main
         - name: pathInRepo
           value: tasks/provision-ephemeral-cluster/0.1/provision-ephemeral-cluster.yaml
 
@@ -107,7 +101,7 @@ spec:
         value: $(tasks.provision-ephemeral-cluster.results.testPlatformClusterClaimNamespace)
 
   taskRunTemplate:
-    serviceAccountName: build-pipeline-foobar-f1bce
+    serviceAccountName: build-pipeline-foobar-eb164
 
   workspaces:
   - name: git-auth
