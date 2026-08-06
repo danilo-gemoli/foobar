@@ -17,6 +17,7 @@ metadata:
     pipelines.appstudio.openshift.io/type: build
   name: foobar-f8d5b-on-pull-request
   namespace: testplatform-ci-tenant
+  
 spec:
   params:
   - name: git-url
