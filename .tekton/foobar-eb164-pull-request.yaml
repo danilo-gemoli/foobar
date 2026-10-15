@@ -1,0 +1,114 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  annotations:
+    build.appstudio.openshift.io/repo: https://github.com/danilo-gemoli/foobar?rev={{revision}}
+    build.appstudio.redhat.com/commit_sha: '{{revision}}'
+    build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
+    build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
+    pipelinesascode.tekton.dev/max-keep-runs: "3"
+    pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
+      == "main"
+  creationTimestamp: null
+  labels:
+    appstudio.openshift.io/application: foobar
+    appstudio.openshift.io/component: foobar-eb164
+    pipelines.appstudio.openshift.io/type: build
+  name: foobar-eb164-on-pull-request
+  namespace: testplatform-ci-tenant
+spec:
+  pipelineSpec:
+    description: Provision ephemeral cluster test
+
+    tasks:
+    - name: provision-ephemeral-cluster
+      params:
+      - name: ownerName
+        value: $(context.pipelineRun.name)
+      - name: ownerUid
+        value: $(context.pipelineRun.uid)
+      - name: workflow
+        value: hypershift-hostedcluster-workflow
+      - name: clusterProfile
+        value: aws-konflux-prod
+      - name: releases
+        value: |
+          {
+            "latest": {
+              "release": {
+                "channel": "stable",
+                "version": "4.22",
+                "architecture": "multi"
+              }
+            }
+          }
+      - name: env
+        value: |
+          {
+            "COMPUTE_NODE_TYPE": "m5.2xlarge",
+            "HYPERSHIFT_NODE_COUNT": "3",
+            "HOSTED_MANAGEMENT_CLUSTER": "hosted-mgmt2",
+            "CONTROL_PLANE_NODE_SELECTOR": "kubernetes.io/arch=amd64",
+            "FIPS": "true",
+            "IMAGE_CONTENT_SOURCES": "- source: registry.redhat.io/openshift-pipelines\n  mirrors:\n  - quay.io/openshift-pipeline"
+          }
+      - name: timeout
+        value: "3h"
+      - name: waitForTearDownTimeout
+        value: "4h"
+      taskRef:
+        resolver: git
+        params:
+        - name: url
+          value: https://github.com/danilo-gemoli/openshift-konflux-tasks
+        - name: revision
+          value: feat/provision-ephemeral-cluster/add-wait-timeout
+        - name: pathInRepo
+          value: tasks/provision-ephemeral-cluster/0.1/provision-ephemeral-cluster.yaml
+
+    - name: run-test
+      runAfter:
+      - provision-ephemeral-cluster
+      params:
+      - name: clusterCredentialsSecretRef
+        value: $(tasks.provision-ephemeral-cluster.results.secretRef)
+      taskSpec:
+        params:
+        - name: clusterCredentialsSecretRef
+          type: string
+          description: "The secret that holds the cluster credentials"
+        steps:
+        - name: run-test
+          image: quay.io/konflux-ci/konflux-test:v1.4.52@sha256:aa2c97da9bb73a4e8d1c6b41950f8d902b74461be0e042debe89277fdc4ebe49
+          env:
+          - name: KUBECONFIG_VALUE
+            valueFrom:
+              secretKeyRef:
+                name: $(params.clusterCredentialsSecretRef)
+                key: kubeconfig
+          script: |
+            #!/usr/bin/env bash
+            set -eo pipefail
+
+            KUBECONFIG="$(mktemp kubeconfig.XXXXX)"
+            trap 'rm -f "$KUBECONFIG"' EXIT
+
+            echo "$KUBECONFIG_VALUE" >"$KUBECONFIG"
+            export KUBECONFIG
+            oc whoami
+
+  taskRunTemplate:
+    serviceAccountName: build-pipeline-foobar-eb164
+
+  workspaces:
+  - name: git-auth
+    secret:
+      secretName: '{{ git_auth_secret }}'
+
+  timeouts:
+    pipeline: 12h0m0s
+    tasks: 6h0m0s
+    finally: 6h0m0s
+
+status: {}
